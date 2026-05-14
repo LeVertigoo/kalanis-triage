@@ -468,7 +468,7 @@ async function checkNotion() {
 }
 
 async function syncToNotion(contact, statusValue) {
-  if (!notionConnected) return;
+  showToast('⏳ Sync Notion…');
   try {
     const r = await fetch('/api/notion', {
       method: 'POST',
@@ -479,14 +479,17 @@ async function syncToNotion(contact, statusValue) {
     if (data.ok) {
       showToast('✅ Ajouté dans Notion !');
     } else {
-      showToast('⚠️ Notion : ' + (data.error || 'erreur inconnue'));
-      console.error('Notion error:', data.error);
+      showToast('⚠️ ' + (data.error || 'Erreur Notion inconnue'));
+      console.error('Notion error:', data);
     }
   } catch(e) {
-    // silencieux si pas de serveur
+    showToast('⚠️ Notion injoignable : ' + e.message);
+    console.error('Notion fetch error:', e);
   }
 }
 
+async function syncToNotion_old() { // vieille version supprimée
+ 
 async function saveNotionToken() {
   const token = document.getElementById('notion-token-input').value.trim();
   if (!token) return;
