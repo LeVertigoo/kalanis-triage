@@ -352,6 +352,7 @@ function tag(status) {
       email: c.email
     }, notionStatus);
   }
+  // Skip Notion pour les autres statuts
 
   cursor++;
   renderCard();
@@ -488,8 +489,6 @@ async function syncToNotion(contact, statusValue) {
   }
 }
 
-async function syncToNotion_old() { // vieille version supprimée
- 
 async function saveNotionToken() {
   const token = document.getElementById('notion-token-input').value.trim();
   if (!token) return;
