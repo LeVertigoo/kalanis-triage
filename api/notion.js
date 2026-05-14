@@ -21,6 +21,23 @@ async function getSchema(token) {
   return db.properties || {};
 }
 
+// Cherche un contact existant par URL LinkedIn
+async function findExistingPage(urlKey, profileUrl, token) {
+  if (!urlKey || !profileUrl) return null;
+  try {
+    const result = await notionRequest("POST", `/databases/${DB_ID}/query`, {
+      filter: {
+        property: urlKey,
+        url: { equals: profileUrl },
+      },
+      page_size: 1,
+    }, token);
+    return result.results?.[0] ?? null;
+  } catch {
+    return null;
+  }
+}
+
 function buildProperties(schema, name, statusValue, profileUrl) {
   const today = new Date().toISOString().slice(0, 10);
   const props = {};
@@ -39,7 +56,7 @@ function buildProperties(schema, name, statusValue, profileUrl) {
     else if (t === "select") props[statusKey] = { select: { name: statusValue } };
   }
 
-  // ── Assignation (People) ────────────────────
+  // ── Assignation ─────────────────────────────
   if (schema["Assignation"]) {
     const t = schema["Assignation"].type;
     if (t === "people") {
@@ -52,11 +69,8 @@ function buildProperties(schema, name, statusValue, profileUrl) {
   // ── Source ─────────────────────────────────
   if (schema["Source"]) {
     const t = schema["Source"].type;
-    if (t === "select") {
-      props["Source"] = { select: { name: "Follow" } };
-    } else if (t === "multi_select") {
-      props["Source"] = { multi_select: [{ name: "Follow" }] };
-    }
+    if (t === "select") props["Source"] = { select: { name: "Follow" } };
+    else if (t === "multi_select") props["Source"] = { multi_select: [{ name: "Follow" }] };
   }
 
   // ── Date de contact ────────────────────────
@@ -78,7 +92,7 @@ function buildProperties(schema, name, statusValue, profileUrl) {
   );
   if (urlKey) props[urlKey] = { url: profileUrl || null };
 
-  return props;
+  return { props, dateKey, urlKey };
 }
 
 export default async function handler(req, res) {
@@ -96,14 +110,31 @@ export default async function handler(req, res) {
     if (!contact || !statusValue) return res.status(400).json({ error: "contact et status requis" });
 
     const schema = await getSchema(token);
-    const props = buildProperties(schema, contact.name, statusValue, contact.url);
+    const { props, dateKey, urlKey } = buildProperties(schema, contact.name, statusValue, contact.url);
+    const today = new Date().toISOString().slice(0, 10);
 
+    // ── Cherche si le contact existe déjà ──────
+    const existing = await findExistingPage(urlKey, contact.url, token);
+
+    if (existing) {
+      // Mise à jour : date de contact seulement
+      const updateProps = {};
+      if (dateKey) updateProps[dateKey] = { date: { start: today } };
+
+      await notionRequest("PATCH", `/pages/${existing.id}`, {
+        properties: updateProps,
+      }, token);
+
+      return res.status(200).json({ ok: true, updated: true, id: existing.id });
+    }
+
+    // ── Création nouvelle fiche ─────────────────
     const page = await notionRequest("POST", "/pages", {
       parent: { database_id: DB_ID },
       properties: props,
     }, token);
 
-    return res.status(200).json({ ok: true, id: page.id, url: page.url });
+    return res.status(200).json({ ok: true, updated: false, id: page.id });
   } catch (err) {
     console.error("Notion error:", err.message);
     return res.status(400).json({ error: err.message });
