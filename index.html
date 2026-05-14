@@ -478,7 +478,7 @@ async function syncToNotion(contact, statusValue) {
     });
     const data = await r.json();
     if (data.ok) {
-      showToast('✅ Ajouté dans Notion !');
+      showToast(data.updated ? '🔄 Date mise à jour dans Notion' : '✅ Ajouté dans Notion !');
     } else {
       showToast('⚠️ ' + (data.error || 'Erreur Notion inconnue'));
       console.error('Notion error:', data);
