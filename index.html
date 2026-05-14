@@ -97,6 +97,8 @@
   .btn-s:hover { background: rgba(59,130,246,0.15); }
   .btn-n { border-color: #6b7280; color: #9ca3af; }
   .btn-n:hover { background: rgba(107,114,128,0.15); }
+  .btn-d { border-color: #8b5cf6; color: #c4b5fd; grid-column: span 2; }
+  .btn-d:hover { background: rgba(139,92,246,0.15); }
 
   /* EMPTY STATE */
   .empty { text-align: center; padding: 48px 24px; }
@@ -143,6 +145,8 @@
     <div class="stat blue"><div class="stat-num" id="cnt-s">0</div><div class="stat-label">Signés</div></div>
     <div class="divider"></div>
     <div class="stat red"><div class="stat-num" id="cnt-n">0</div><div class="stat-label">Hors cible</div></div>
+    <div class="divider"></div>
+    <div class="stat" style="color:var(--text2)"><div class="stat-num" id="cnt-d" style="color:#c4b5fd">0</div><div class="stat-label">Discussion</div></div>
   </div>
 </div>
 
@@ -185,6 +189,7 @@
     <button class="action-btn btn-r" onclick="tag('relancer')">🔁 À relancer<span class="btn-key">Touche 2</span></button>
     <button class="action-btn btn-s" onclick="tag('signe')">🏆 Déjà signé<span class="btn-key">Touche 3</span></button>
     <button class="action-btn btn-n" onclick="tag('non')">❌ Pas ma cible<span class="btn-key">Touche 4</span></button>
+    <button class="action-btn btn-d" onclick="tag('discussion')">💬 Discussion en cours<span class="btn-key">Touche 5</span></button>
   </div>
 </div>
 
@@ -236,6 +241,7 @@ function updateCounters() {
   document.getElementById('cnt-r').textContent = vals.filter(v=>v==='relancer').length;
   document.getElementById('cnt-s').textContent = vals.filter(v=>v==='signe').length;
   document.getElementById('cnt-n').textContent = vals.filter(v=>v==='non').length;
+  document.getElementById('cnt-d').textContent = vals.filter(v=>v==='discussion').length;
   const total = vals.length;
   document.getElementById('export-hint').textContent = total + ' contact(s) tagué(s)';
 }
@@ -340,7 +346,7 @@ function tag(status) {
   if (cursor >= filteredList.length) return;
   const c = filteredList[cursor];
   setStatus(c.id, status);
-  const labels = { client: '✅ Client potentiel', relancer: '🔁 À relancer', signe: '🏆 Signé', non: '❌ Pas ma cible' };
+  const labels = { client: '✅ Client potentiel', relancer: '🔁 À relancer', signe: '🏆 Signé', non: '❌ Pas ma cible', discussion: '💬 Discussion en cours' };
   showToast(labels[status] || status);
 
   // Sync Notion pour client potentiel et à relancer
@@ -368,7 +374,7 @@ function showToast(msg) {
 
 function exportCSV() {
   const data = getAllStatuses();
-  const STATUS_LABELS = { client: 'Client potentiel', relancer: 'À relancer', signe: 'Déjà signé', non: 'Pas ma cible' };
+  const STATUS_LABELS = { client: 'Client potentiel', relancer: 'À relancer', signe: 'Déjà signé', non: 'Pas ma cible', discussion: 'Discussion en cours' };
   const tagged = ALL_CONTACTS.filter(c => data[c.id] !== undefined);
   if (tagged.length === 0) { showToast('Aucun contact tagué !'); return; }
   const rows = [['Prénom','Nom','Poste','Entreprise','Domaine','Catégorie auto','Score','Statut manuel','Email','Connecté le','URL LinkedIn']];
@@ -406,6 +412,7 @@ document.addEventListener('keydown', e => {
   else if (e.key === '4') tag('non');
   else if (e.key === 'ArrowRight') tag('client');
   else if (e.key === 'ArrowLeft') tag('non');
+  else if (e.key === '5') tag('discussion');
   else if (e.key === 'ArrowUp') tag('signe');
   else if (e.key === 'ArrowDown') tag('relancer');
 });
