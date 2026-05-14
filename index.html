@@ -345,7 +345,7 @@ function tag(status) {
 
   // Sync Notion pour client potentiel et à relancer
   if (status === 'client' || status === 'relancer') {
-    const notionStatus = status === 'client' ? 'Connexion accepté' : 'À relancer';
+    const notionStatus = status === 'client' ? 'Demande acceptée' : 'À relancer';
     syncToNotion({
       name: (c.firstName + ' ' + c.lastName).trim(),
       url: c.url,
