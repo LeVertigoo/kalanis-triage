@@ -1,4 +1,5 @@
 const DB_ID = "309656bd751e80d2ba5cdba74a6d4fcf";
+const THOMAS_USER_ID = "fc0ed860-5711-4ff7-894b-f62c75621643";
 
 async function notionRequest(method, path, body, token) {
   const res = await fetch(`https://api.notion.com/v1${path}`, {
@@ -17,47 +18,52 @@ async function notionRequest(method, path, body, token) {
 
 async function getSchema(token) {
   const db = await notionRequest("GET", `/databases/${DB_ID}`, null, token);
-  // Retourne { "Nom propriété": { type: "...", id: "..." } }
   return db.properties || {};
-}
-
-function findKey(schema, names) {
-  return Object.keys(schema).find((k) => names.includes(k.toLowerCase().trim()));
 }
 
 function buildProperties(schema, name, statusValue, profileUrl) {
   const today = new Date().toISOString().slice(0, 10);
   const props = {};
 
-  // ── Titre (title) ──────────────────────────
+  // ── Titre ──────────────────────────────────
   const titleKey = Object.keys(schema).find((k) => schema[k].type === "title") || "Name";
   props[titleKey] = { title: [{ text: { content: name } }] };
 
   // ── Status ─────────────────────────────────
-  const statusKey = findKey(schema, ["status", "statut", "état", "etat"]);
+  const statusKey = Object.keys(schema).find((k) =>
+    ["status", "statut"].includes(k.toLowerCase())
+  );
   if (statusKey) {
     const t = schema[statusKey].type;
     if (t === "status") props[statusKey] = { status: { name: statusValue } };
     else if (t === "select") props[statusKey] = { select: { name: statusValue } };
   }
 
-  // ── Assignation ────────────────────────────
-  const assignKey = findKey(schema, ["assignation", "assigné", "assigne", "assigned", "responsable"]);
-  if (assignKey) {
-    const t = schema[assignKey].type;
-    if (t === "select") props[assignKey] = { select: { name: "Thomas" } };
-    // People : nécessite l'ID Notion de l'utilisateur → on skip pour l'instant
+  // ── Assignation (People) ────────────────────
+  if (schema["Assignation"]) {
+    const t = schema["Assignation"].type;
+    if (t === "people") {
+      props["Assignation"] = { people: [{ object: "user", id: THOMAS_USER_ID }] };
+    } else if (t === "select") {
+      props["Assignation"] = { select: { name: "Thomas" } };
+    }
   }
 
   // ── Source ─────────────────────────────────
-  const sourceKey = findKey(schema, ["source", "origine"]);
-  if (sourceKey && schema[sourceKey].type === "select") {
-    props[sourceKey] = { select: { name: "Follow" } };
+  if (schema["Source"]) {
+    const t = schema["Source"].type;
+    if (t === "select") {
+      props["Source"] = { select: { name: "Follow" } };
+    } else if (t === "multi_select") {
+      props["Source"] = { multi_select: [{ name: "Follow" }] };
+    }
   }
 
   // ── Date de contact ────────────────────────
   const dateKey = Object.keys(schema).find(
-    (k) => schema[k].type === "date" && (k.toLowerCase().includes("date") || k.toLowerCase().includes("contact"))
+    (k) => schema[k].type === "date" && (
+      k.toLowerCase().includes("date") || k.toLowerCase().includes("contact")
+    )
   );
   if (dateKey) props[dateKey] = { date: { start: today } };
 
@@ -65,9 +71,9 @@ function buildProperties(schema, name, statusValue, profileUrl) {
   const urlKey = Object.keys(schema).find(
     (k) => schema[k].type === "url" && (
       k.toLowerCase().includes("lien") ||
-      k.toLowerCase().includes("url") ||
       k.toLowerCase().includes("profil") ||
-      k.toLowerCase().includes("linkedin")
+      k.toLowerCase().includes("linkedin") ||
+      k.toLowerCase().includes("url")
     )
   );
   if (urlKey) props[urlKey] = { url: profileUrl || null };
@@ -89,14 +95,8 @@ export default async function handler(req, res) {
     const { contact, status: statusValue } = req.body;
     if (!contact || !statusValue) return res.status(400).json({ error: "contact et status requis" });
 
-    // Récupère le schéma complet pour debug
     const schema = await getSchema(token);
-
-    // Log des propriétés trouvées (visible dans les logs Vercel)
-    console.log("Schema keys:", Object.keys(schema).map(k => `${k} (${schema[k].type})`));
-
     const props = buildProperties(schema, contact.name, statusValue, contact.url);
-    console.log("Props envoyées:", JSON.stringify(props));
 
     const page = await notionRequest("POST", "/pages", {
       parent: { database_id: DB_ID },
