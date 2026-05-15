@@ -485,7 +485,9 @@ async function syncToNotion(contact, statusValue) {
     });
     const data = await r.json();
     if (data.ok) {
-      showToast(data.updated ? '🔄 Date mise à jour dans Notion' : '✅ Ajouté dans Notion !');
+      if (data.lorisTransferred) showToast('🔀 Transféré de Loris → Thomas dans Notion');
+      else if (data.updated) showToast('🔄 Date mise à jour dans Notion');
+      else showToast('✅ Ajouté dans Notion !');
     } else {
       showToast('⚠️ ' + (data.error || 'Erreur Notion inconnue'));
       console.error('Notion error:', data);
