@@ -2,6 +2,16 @@ const DB_ID = "309656bd751e80d2ba5cdba74a6d4fcf";
 const THOMAS_USER_ID = "fc0ed860-5711-4ff7-894b-f62c75621643";
 const LORIS_EMAIL = "loris.mourard@gmail.com";
 
+// Noms exacts des propriétés (depuis /api/debug)
+const PROPS = {
+  title:      "Name",
+  status:     "Status",
+  assignation:"Assignation",
+  source:     "Source",
+  date:       "Date de contact",
+  url:        "Lien du profil",
+};
+
 async function notionRequest(method, path, body, token) {
   const res = await fetch(`https://api.notion.com/v1${path}`, {
     method,
@@ -17,9 +27,27 @@ async function notionRequest(method, path, body, token) {
   return data;
 }
 
-async function getSchema(token) {
-  const db = await notionRequest("GET", `/databases/${DB_ID}`, null, token);
-  return db.properties || {};
+// Extrait le slug LinkedIn : "https://linkedin.com/in/john-doe?foo=bar" → "/in/john-doe"
+function extractLinkedInSlug(url) {
+  if (!url) return null;
+  const match = url.match(/\/in\/([^/?#]+)/i);
+  return match ? `/in/${match[1]}` : null;
+}
+
+// Cherche un contact existant via le slug de son URL LinkedIn
+async function findExistingPage(profileUrl, token) {
+  const slug = extractLinkedInSlug(profileUrl);
+  if (!slug) return null;
+
+  const result = await notionRequest("POST", `/databases/${DB_ID}/query`, {
+    filter: {
+      property: PROPS.url,
+      url: { contains: slug },
+    },
+    page_size: 1,
+  }, token);
+
+  return result.results?.[0] ?? null;
 }
 
 // Récupère l'ID Notion de Loris via son email
@@ -35,78 +63,21 @@ async function getLorisId(token) {
   }
 }
 
-// Cherche un contact existant par URL LinkedIn
-async function findExistingPage(urlKey, profileUrl, token) {
-  if (!urlKey || !profileUrl) return null;
-  try {
-    const result = await notionRequest("POST", `/databases/${DB_ID}/query`, {
-      filter: { property: urlKey, url: { equals: profileUrl } },
-      page_size: 1,
-    }, token);
-    return result.results?.[0] ?? null;
-  } catch {
-    return null;
-  }
-}
-
-// Génère une icône initiales via UI Avatars
+// Icône initiales (bleu LinkedIn)
 function getAvatarUrl(name) {
-  const encoded = encodeURIComponent(name.trim());
-  return `https://ui-avatars.com/api/?name=${encoded}&background=0A66C2&color=fff&bold=true&size=128&format=png`;
+  return `https://ui-avatars.com/api/?name=${encodeURIComponent(name.trim())}&background=0A66C2&color=fff&bold=true&size=128`;
 }
 
-function buildProperties(schema, name, statusValue, profileUrl) {
+function buildNewPageProps(name, statusValue, profileUrl) {
   const today = new Date().toISOString().slice(0, 10);
-  const props = {};
-
-  // ── Titre ──────────────────────────────────
-  const titleKey = Object.keys(schema).find((k) => schema[k].type === "title") || "Name";
-  props[titleKey] = { title: [{ text: { content: name } }] };
-
-  // ── Status ─────────────────────────────────
-  const statusKey = Object.keys(schema).find((k) =>
-    ["status", "statut"].includes(k.toLowerCase())
-  );
-  if (statusKey) {
-    const t = schema[statusKey].type;
-    if (t === "status") props[statusKey] = { status: { name: statusValue } };
-    else if (t === "select") props[statusKey] = { select: { name: statusValue } };
-  }
-
-  // ── Assignation ─────────────────────────────
-  if (schema["Assignation"]?.type === "people") {
-    props["Assignation"] = { people: [{ object: "user", id: THOMAS_USER_ID }] };
-  } else if (schema["Assignation"]?.type === "select") {
-    props["Assignation"] = { select: { name: "Thomas" } };
-  }
-
-  // ── Source ─────────────────────────────────
-  if (schema["Source"]?.type === "select") {
-    props["Source"] = { select: { name: "Follow" } };
-  } else if (schema["Source"]?.type === "multi_select") {
-    props["Source"] = { multi_select: [{ name: "Follow" }] };
-  }
-
-  // ── Date de contact ────────────────────────
-  const dateKey = Object.keys(schema).find(
-    (k) => schema[k].type === "date" && (
-      k.toLowerCase().includes("date") || k.toLowerCase().includes("contact")
-    )
-  );
-  if (dateKey) props[dateKey] = { date: { start: today } };
-
-  // ── Lien du profil ─────────────────────────
-  const urlKey = Object.keys(schema).find(
-    (k) => schema[k].type === "url" && (
-      k.toLowerCase().includes("lien") ||
-      k.toLowerCase().includes("profil") ||
-      k.toLowerCase().includes("linkedin") ||
-      k.toLowerCase().includes("url")
-    )
-  );
-  if (urlKey) props[urlKey] = { url: profileUrl || null };
-
-  return { props, dateKey, urlKey, statusKey };
+  return {
+    [PROPS.title]:      { title: [{ text: { content: name } }] },
+    [PROPS.status]:     { status: { name: statusValue } },
+    [PROPS.assignation]:{ people: [{ object: "user", id: THOMAS_USER_ID }] },
+    [PROPS.source]:     { multi_select: [{ name: "Follow" }] },
+    [PROPS.date]:       { date: { start: today } },
+    [PROPS.url]:        { url: profileUrl || null },
+  };
 }
 
 export default async function handler(req, res) {
@@ -117,45 +88,39 @@ export default async function handler(req, res) {
   if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
 
   const token = process.env.NOTION_TOKEN;
-  if (!token) return res.status(500).json({ error: "NOTION_TOKEN non configuré dans Vercel" });
+  if (!token) return res.status(500).json({ error: "NOTION_TOKEN non configuré" });
 
   try {
     const { contact, status: statusValue } = req.body;
     if (!contact || !statusValue) return res.status(400).json({ error: "contact et status requis" });
 
     const today = new Date().toISOString().slice(0, 10);
-    const [schema, lorisId] = await Promise.all([getSchema(token), getLorisId(token)]);
-    const { props, dateKey, urlKey, statusKey } = buildProperties(schema, contact.name, statusValue, contact.url);
 
-    // ── Cherche si contact déjà dans Notion ────
-    const existing = await findExistingPage(urlKey, contact.url, token);
+    // Recherche doublon + ID Loris en parallèle
+    const [existing, lorisId] = await Promise.all([
+      findExistingPage(contact.url, token),
+      getLorisId(token),
+    ]);
 
     if (existing) {
-      // Vérifie si Loris est dans l'assignation
-      const currentPeople = existing.properties?.["Assignation"]?.people ?? [];
-      const lorisIsAssigned = lorisId && currentPeople.some((p) => p.id === lorisId);
-      const thomasIsAssigned = currentPeople.some((p) => p.id === THOMAS_USER_ID);
+      const currentPeople = existing.properties?.[PROPS.assignation]?.people ?? [];
+      const lorisAssigned = lorisId && currentPeople.some((p) => p.id === lorisId);
+      const thomasAssigned = currentPeople.some((p) => p.id === THOMAS_USER_ID);
 
-      const updateProps = {};
+      const updateProps = {
+        [PROPS.date]: { date: { start: today } },
+      };
 
-      // Toujours mettre la date à jour
-      if (dateKey) updateProps[dateKey] = { date: { start: today } };
-
-      if (lorisIsAssigned && !thomasIsAssigned) {
-        // Loris avait le prospect → on ajoute Thomas et on met à jour le status
-        updateProps["Assignation"] = {
+      if (lorisAssigned && !thomasAssigned) {
+        // Prospect de Loris → on ajoute Thomas + on met à jour le status
+        updateProps[PROPS.assignation] = {
           people: [
             { object: "user", id: THOMAS_USER_ID },
             { object: "user", id: lorisId },
           ],
         };
-        if (statusKey) {
-          const t = schema[statusKey].type;
-          if (t === "status") updateProps[statusKey] = { status: { name: statusValue } };
-          else if (t === "select") updateProps[statusKey] = { select: { name: statusValue } };
-        }
+        updateProps[PROPS.status] = { status: { name: statusValue } };
       }
-      // Si Thomas est déjà assigné seul → juste la date (pas de changement de status)
 
       await notionRequest("PATCH", `/pages/${existing.id}`, {
         properties: updateProps,
@@ -164,22 +129,20 @@ export default async function handler(req, res) {
       return res.status(200).json({
         ok: true,
         updated: true,
-        lorisTransferred: lorisIsAssigned && !thomasIsAssigned,
+        lorisTransferred: lorisAssigned && !thomasAssigned,
         id: existing.id,
       });
     }
 
-    // ── Nouvelle fiche ──────────────────────────
+    // Nouvelle fiche
     const page = await notionRequest("POST", "/pages", {
       parent: { database_id: DB_ID },
-      properties: props,
-      icon: {
-        type: "external",
-        external: { url: getAvatarUrl(contact.name) },
-      },
+      properties: buildNewPageProps(contact.name, statusValue, contact.url),
+      icon: { type: "external", external: { url: getAvatarUrl(contact.name) } },
     }, token);
 
     return res.status(200).json({ ok: true, updated: false, id: page.id });
+
   } catch (err) {
     console.error("Notion error:", err.message);
     return res.status(400).json({ error: err.message });
